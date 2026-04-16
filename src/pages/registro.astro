@@ -41,6 +41,9 @@ import MainLayout from "../layouts/MainLayout.astro";
       <input type="hidden" id="is-cliente" value="false" />
       
       <button class="btn btn-primary btn-full" id="btn-guardar">Registrar Participante</button>
+      <button class="btn btn-secondary btn-full quick-assign-btn" id="btn-go-pendientes" style="display:none">
+        Ir a Asignar Partidas Pendientes
+      </button>
       <div id="feedback" class="feedback-toast" style="display:none"></div>
       <div id="error-card" class="status-card warn" style="display:none">
         <div class="status-info">
@@ -85,6 +88,7 @@ import MainLayout from "../layouts/MainLayout.astro";
     .status-msg { font-size: 13px; color: var(--text-muted); }
 
     .secondary-fields { margin-top: 4px; }
+    .quick-assign-btn { margin-top: 10px; }
 
     .feedback-toast {
       position: fixed;
@@ -126,6 +130,7 @@ import MainLayout from "../layouts/MainLayout.astro";
     const errorMsg = document.getElementById("error-msg")!;
     const btnValidar = document.getElementById("btn-validar") as HTMLButtonElement;
     const btnGuardar = document.getElementById("btn-guardar") as HTMLButtonElement;
+    const btnGoPendientes = document.getElementById("btn-go-pendientes") as HTMLButtonElement;
     let cedulaYaRegistrada = false;
 
     function setBusy(btn: HTMLButtonElement, busy: boolean, text: string, idleText: string) {
@@ -148,9 +153,24 @@ import MainLayout from "../layouts/MainLayout.astro";
       telInp.value = "";
       isCli.value = "false";
       statusCard.style.display = "none";
+      btnGoPendientes.style.display = "none";
       statusCard.className = "status-card";
       statusTitle.textContent = "Validando...";
       statusMsg.textContent = "Consultando base de datos Fibra.";
+    }
+
+    function mostrarAtajoPendientes(cedula: string) {
+      if (!cedula) return;
+      btnGoPendientes.style.display = "inline-flex";
+      btnGoPendientes.textContent = "Asignar Score Ahora";
+      btnGoPendientes.onclick = () => {
+        window.location.href = `/pendientes?cedula=${encodeURIComponent(cedula)}`;
+      };
+      statusCard.style.display = "flex";
+      statusCard.className = "status-card ok";
+      statusTitle.textContent = "Accion Recomendada";
+      statusMsg.textContent = "Puedes asignar partidas pendientes de este jugador ahora mismo.";
+      btnGoPendientes.scrollIntoView({ behavior: "smooth", block: "center" });
     }
 
     async function validar() {
@@ -180,6 +200,7 @@ import MainLayout from "../layouts/MainLayout.astro";
           telInp.value = jugadorExistente.telefono || "";
           isCli.value = jugadorExistente.is_cliente ? "true" : "false";
           setGuardarHabilitado(false);
+          mostrarAtajoPendientes(cedInp.value.trim());
           return;
         }
 
@@ -223,6 +244,10 @@ import MainLayout from "../layouts/MainLayout.astro";
         showError("Nombre y documento son obligatorios.");
         return;
       }
+      if (!payload.telefono || payload.telefono.length < 6) {
+        showError("El teléfono debe tener al menos 6 caracteres.");
+        return;
+      }
 
       if (cedulaYaRegistrada) {
         showError("Este participante ya se encuentra registrado.");
@@ -239,17 +264,28 @@ import MainLayout from "../layouts/MainLayout.astro";
         });
         if (r.ok) {
           showToast("¡Jugador Registrado!");
-          cedInp.value = "";
-          nomInp.value = "";
-          telInp.value = "";
-          isCli.value = "false";
-          statusCard.style.display = "none";
+          mostrarAtajoPendientes(payload.cedula);
+          cedulaYaRegistrada = true;
+          setGuardarHabilitado(false);
           setTimeout(() => {
             const t = document.getElementById("feedback")!;
             t.style.display = "none";
           }, 1600);
         } else {
-          showError("No se pudo registrar el participante.");
+          let serverMsg = "No se pudo registrar el participante.";
+          try {
+            const err = await r.json();
+            if (err?.message) serverMsg = err.message;
+            if (err?.data?.errors?.length) {
+              const firstError = err.data.errors[0];
+              const field = Array.isArray(firstError?.loc) ? firstError.loc.at(-1) : "";
+              const msg = firstError?.msg || "";
+              if (field || msg) {
+                serverMsg = `Validación ${field ? `"${field}"` : "de datos"}: ${msg}`;
+              }
+            }
+          } catch {}
+          showError(serverMsg);
         }
       } catch {
         showError("Error de red al registrar participante.");

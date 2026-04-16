@@ -24,6 +24,8 @@ import MainLayout from "../layouts/MainLayout.astro";
       No se pudo cargar la cola de partidas.
     </div>
     <div id="feedback" class="state-msg success" style="display:none"></div>
+    <div id="prefill-msg" class="state-msg info" style="display:none"></div>
+    <datalist id="players-datalist"></datalist>
 
     <div class="pagination">
       <button class="btn btn-ghost" id="prev-page">Anterior</button>
@@ -79,6 +81,11 @@ import MainLayout from "../layouts/MainLayout.astro";
       color: #bbf7d0;
       background: rgba(34, 197, 94, 0.12);
     }
+    .state-msg.info {
+      border-color: rgba(0, 153, 255, 0.45);
+      color: #bae6fd;
+      background: rgba(0, 153, 255, 0.12);
+    }
 
     .pagination {
       display: flex;
@@ -102,8 +109,12 @@ import MainLayout from "../layouts/MainLayout.astro";
     const prevPageBtn = document.getElementById("prev-page") as HTMLButtonElement;
     const nextPageBtn = document.getElementById("next-page") as HTMLButtonElement;
     const pageNum = document.getElementById("page-num")!;
+    const prefillMsg = document.getElementById("prefill-msg")!;
+    const playersDatalist = document.getElementById("players-datalist") as HTMLDataListElement;
+    const prefillCedula = new URLSearchParams(window.location.search).get("cedula")?.trim() || "";
     let page = 0;
     let allItems: any[] = [];
+    let jugadoresCache: any[] = [];
 
     function showFeedback(msg: string) {
       feedback.textContent = msg;
@@ -118,6 +129,7 @@ import MainLayout from "../layouts/MainLayout.astro";
       error.style.display = "none";
       empty.style.display = "none";
       try {
+        await loadJugadoresAutocomplete();
         const r = await fetch(`${API}/api/puntajes/pendientes`);
         if (!r.ok) throw new Error("api_error");
         const d = await r.json();
@@ -156,16 +168,49 @@ import MainLayout from "../layouts/MainLayout.astro";
               <span class="q-score">${fmt(item.puntaje)}</span>
             </div>
             <div class="q-form">
-              <input type="text" id="in-${item.id}" placeholder="Cédula del jugador..." inputmode="numeric" />
+              <input type="text" id="in-${item.id}" class="assign-input" list="players-datalist" placeholder="Cédula o nombre del jugador..." />
               <button class="btn btn-primary btn-sm assign-btn" data-id="${item.id}">Asignar</button>
             </div>
           </div>
         `;
       }).join("");
+
+      if (prefillCedula) {
+        const firstInput = stack.querySelector(".assign-input") as HTMLInputElement | null;
+        if (firstInput) {
+          firstInput.value = prefillCedula;
+          firstInput.focus();
+          prefillMsg.textContent = `Cédula pre-cargada: ${prefillCedula}. Solo selecciona la partida y asigna.`;
+          prefillMsg.style.display = "block";
+        }
+      }
+    }
+
+    async function loadJugadoresAutocomplete() {
+      if (jugadoresCache.length) return;
+      const r = await fetch(`${API}/api/jugadores`);
+      if (!r.ok) throw new Error("players_error");
+      const d = await r.json();
+      jugadoresCache = d.data || [];
+      playersDatalist.innerHTML = jugadoresCache.map((j: any) =>
+        `<option value="${j.cedula}" label="${j.nombre}"></option>`
+      ).join("");
+    }
+
+    function resolveCedula(inputValue: string) {
+      const raw = inputValue.trim();
+      if (!raw) return "";
+      const exactCedula = jugadoresCache.find((j: any) => j.cedula === raw);
+      if (exactCedula) return exactCedula.cedula;
+      const byName = jugadoresCache.find((j: any) => j.nombre?.toLowerCase() === raw.toLowerCase());
+      if (byName) return byName.cedula;
+      const cedPrefix = raw.match(/^\d+/)?.[0];
+      return cedPrefix || raw;
     }
 
     async function asignar(pid: string) {
-      const ced = (document.getElementById(`in-${pid}`) as HTMLInputElement).value;
+      const raw = (document.getElementById(`in-${pid}`) as HTMLInputElement).value;
+      const ced = resolveCedula(raw);
       if (!ced) return;
 
       try {
